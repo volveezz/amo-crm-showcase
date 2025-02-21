@@ -1,4 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  HttpException,
+  HttpStatus,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 interface BaseRequestPayload {
@@ -13,6 +19,15 @@ export interface RequestPayload extends BaseRequestPayload {
 
 export interface AuthRequestPayload extends BaseRequestPayload {
   code: string;
+}
+
+interface ErrorResponse {
+  status?: number;
+  title?: string;
+  detail?: string;
+  message?: string;
+  statusText?: string;
+  [key: string]: any;
 }
 
 @Injectable()
@@ -56,15 +71,60 @@ export class RequestManagerService {
     }
   }
 
+  private async processError(response: Response): Promise<never> {
+    const errorText = await response.text();
+    let errorBody: ErrorResponse = { message: errorText || 'Unknown error' };
+
+    try {
+      errorBody = JSON.parse(errorText);
+    } catch (parseError) {
+      errorBody.message = errorText || 'No additional error details available';
+    }
+
+    const status = response.status || HttpStatus.INTERNAL_SERVER_ERROR;
+    const errorTitle = errorBody.title || response.statusText || 'Error';
+    const errorMessage =
+      errorBody.detail ||
+      errorBody.message ||
+      response.statusText ||
+      'An unexpected error occurred';
+
+    switch (response.status) {
+      case 401:
+        throw new UnauthorizedException({
+          status: HttpStatus.UNAUTHORIZED,
+          error: errorTitle || 'Unauthorized',
+          message:
+            errorMessage || 'Authentication failed or invalid credentials',
+        });
+
+      case 404:
+        throw new NotFoundException({
+          status: HttpStatus.NOT_FOUND,
+          error: errorTitle || 'Not Found',
+          message: errorMessage || 'Requested resource not found',
+        });
+
+      default:
+        throw new HttpException(
+          {
+            status,
+            error: errorTitle,
+            message: errorMessage,
+          },
+          status,
+        );
+    }
+  }
+
   private async executeFetch(
     endpointURL: string,
     options: RequestInit,
   ): Promise<any> {
     const response = await fetch(endpointURL, options);
+
     if (!response.ok) {
-      const errorText = await response.text();
-      throw response;
-      // throw (`HTTP error ${response.status}: ${errorText}`);
+      return this.processError(response);
     }
 
     if (response.status === 204) return {};

@@ -1,62 +1,42 @@
-import {
-  Controller,
-  Get,
-  HttpException,
-  HttpStatus,
-  Query,
-  Res,
-} from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
-import { Response } from 'express';
-import { RequestManagerService } from '../common/request-manager/request-manager.service.js';
+import { Controller, Get, Query } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { ApiQuery, ApiTags } from '@nestjs/swagger';
+import { AuthService } from './auth.service.js';
 
 @ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly requestManager: RequestManagerService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly configService: ConfigService,
+  ) {}
 
+  @Get('login')
+  async redirectToAuth() {
+    const state = Math.random().toString(36).substring(7);
+    const authUrl = `${this.configService.get('AUTH_URL')}&state=${state}`;
+
+    return this.authService.authRedirect(authUrl);
+  }
+
+  // @ApiQuery({ name: 'state', required: true })
+  // @ApiQuery({ name: 'referer', required: true })
+  @ApiQuery({ name: 'code', required: true })
+  @ApiQuery({ name: 'error', required: false })
   @Get('callback')
   async authCallback(
     @Query('code') code: string,
-    @Query('state') state: string,
-    @Query('referer') referer: string,
+    // @Query('state') state: string,
+    // @Query('referer') referer: string,
     @Query('error') error: string,
-    @Res() res: Response,
   ) {
-    if (error) {
-      throw new HttpException(
-        `Authorization error: ${error}`,
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-    if (!code) {
-      throw new HttpException(
-        'Missing authorization code',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
+    const accountId = await this.authService.authCallback(
+      code,
+      // state,
+      // referer,
+      error,
+    );
 
-    const tokenResponse = await this.requestManager.manageAuthRequest(code);
-
-    if (!tokenResponse.ok) {
-      throw new HttpException(
-        `Token exchange failed: ${tokenResponse}`,
-        HttpStatus.BAD_GATEWAY,
-      );
-    }
-
-    const tokenData = await tokenResponse.json();
-    const { access_token } = tokenData;
-    if (!access_token) {
-      throw new HttpException('Token data incomplete', HttpStatus.BAD_GATEWAY);
-    }
-
-    const { id } = await this.requestManager.manageRequest('/account', {
-      token: access_token,
-    });
-
-    this.requestManager.addToken(id, access_token);
-
-    return res.redirect(`/?auth=success&state=${state}`);
+    return { accountId };
   }
 }

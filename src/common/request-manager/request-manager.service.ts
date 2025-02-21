@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
 interface BaseRequestPayload {
   method?: string;
@@ -16,6 +17,8 @@ export interface AuthRequestPayload extends BaseRequestPayload {
 
 @Injectable()
 export class RequestManagerService {
+  constructor(private readonly configService: ConfigService) {}
+
   private accessTokens = new Map<number, string>();
 
   isAuthorized(accountId: number): boolean {
@@ -60,8 +63,12 @@ export class RequestManagerService {
     const response = await fetch(endpointURL, options);
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`HTTP error ${response.status}: ${errorText}`);
+      throw response;
+      // throw (`HTTP error ${response.status}: ${errorText}`);
     }
+
+    if (response.status === 204) return {};
+
     return response.json();
   }
 
@@ -87,22 +94,27 @@ export class RequestManagerService {
       fetchOptions.body = JSON.stringify(payload.body);
     }
 
-    const endpointURL = `${process.env.AMO_CRM_API_URL}${url}`;
+    const endpointURL = `${this.configService.get('AMO_CRM_API_URL')}${url}`;
+
     return this.executeFetch(endpointURL, fetchOptions);
   }
 
   async manageAuthRequest(code: string): Promise<any> {
     const fetchOptions: RequestInit = {
       method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify({
-        client_id: process.env.AMO_CRM_INTEGRATION_KEY,
-        client_secret: process.env.AMOCRM_SECRET_KEY,
+        client_id: this.configService.get('AMO_CRM_INTEGRATION_KEY'),
+        client_secret: this.configService.get('AMOCRM_SECRET_KEY'),
         code,
-        redirect_uri: process.env.AMO_CRM_REDIRECT_URL,
+        redirect_uri: this.configService.get('AMO_CRM_REDIRECT_URL'),
+        grant_type: 'authorization_code',
       }),
     };
 
-    const endpointURL = 'https://www.amocrm.ru/oauth2/access_token';
+    const endpointURL = this.configService.get('AMO_CRM_OAUTH_TOKEN_URL');
     return this.executeFetch(endpointURL, fetchOptions);
   }
 }
